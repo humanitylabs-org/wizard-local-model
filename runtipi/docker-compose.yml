@@ -26,6 +26,10 @@ services:
       is_main: true
       internal_port: 18805
   model:
+    # App mounts first so Docker seeds the empty named model volume with uid 1000 ownership.
+    depends_on:
+      wizard-local-model:
+        condition: service_started
     # llama.cpp b11749, OCI multi-architecture index; model server has NO public network.
     image: ghcr.io/ggml-org/llama.cpp:server@sha256:9fbaa06d7f4449e2ae0d02b40e0431f7c212dcf231c9e3a7777a6afc2cc8f312
     user: "1000:1000"
