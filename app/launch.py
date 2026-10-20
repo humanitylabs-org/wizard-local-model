@@ -13,7 +13,7 @@ def main():
     if server.LOCAL_READY.is_set():
         model = next(m for m in server.CATALOG if m['id'] == server.settings()['model'])
         child = subprocess.Popen(['/app/llama-server','-m',str(server.MODELS / model['file']),
-            '--alias',model['id'],'--host','127.0.0.1','--port','8080','-c','4096','-t','4','--log-disable'],
+            '--alias',model['id'],'--host','127.0.0.1','--port','8080','-c','65536','--parallel','1','-t','4','--log-disable'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     def stop(*_):
         if child:
