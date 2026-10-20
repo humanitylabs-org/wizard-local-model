@@ -11,16 +11,19 @@ const {chromium, devices} = require(process.env.PLAYWRIGHT_MODULE || 'playwright
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const evidence = path.join(root,'evidence');
 await fs.mkdir(evidence,{recursive:true});
+// Chromium temporary profiles must never land on the host's internal disk.
+process.env.TMPDIR=path.join(evidence,'browser-tmp');
+await fs.mkdir(process.env.TMPDIR,{recursive:true});
 const catalog=[{id:'qwen2.5-1.5b',label:'Qwen2.5 1.5B Instruct (recommended)',size:1117320736},{id:'qwen2.5-0.5b',label:'Qwen2.5 0.5B Instruct (small test)',size:491400032}];
 let state={mode:'on-box',model:'qwen2.5-1.5b',base_url:'',download:{state:'ready',received:1117320736,total:1117320736},models:[{id:'qwen2.5-1.5b',label:'Qwen2.5 1.5B'}],status:'connected',catalog};
 const common={canvas:'transparent',base:'#05030c',chrome:'rgba(12,8,26,.82)',overlay:'rgba(28,19,58,.72)',surface:'rgba(243,239,255,.06)','surface-raised':'rgba(243,239,255,.10)',text:'#f3efff','text-secondary':'#b9b0d8','text-muted':'#9e92be',border:'rgba(205,190,255,.24)',accent:'#b99bff','accent-soft':'rgba(185,155,255,.16)','on-accent':'#05030c','reader-surface':'transparent'};
 const skins={nebula:common,signal:{...common,base:'#f4f5ef',chrome:'#f4f5ef',overlay:'#f4f5ef',surface:'rgba(12,32,14,.05)','surface-raised':'rgba(12,32,14,.10)',text:'#102614','text-secondary':'#344b37','text-muted':'#4c6150',border:'#839486',accent:'#175829','accent-soft':'rgba(23,88,41,.10)','on-accent':'#ffffff'}};
-const hostScript=`const frame=document.querySelector('iframe');let skin='nebula',revision=0;const skins=${JSON.stringify(skins)};function apply(){document.body.style.background=skins[skin].base;frame.contentWindow.postMessage({type:'wizard:appearance',appearance:{version:1,revision:++revision,skin,colorScheme:skin==='nebula'?'dark':'light',presentation:'window',tokens:skins[skin]}},location.origin);}addEventListener('message',e=>{if(e.origin===location.origin&&e.source===frame.contentWindow&&e.data?.type==='wizard:appearance:ready')apply();});document.querySelectorAll('button').forEach(b=>b.onclick=()=>{skin=b.dataset.skin;apply();});`;
+const hostScript=`const frame=document.querySelector('iframe');let skin='nebula',revision=0;const skins=${JSON.stringify(skins)};function apply(){document.body.style.background=skins[skin].base;document.documentElement.style.colorScheme=skin==='nebula'?'dark':'light';frame.style.colorScheme='inherit';frame.contentWindow.postMessage({type:'wizard:appearance',appearance:{version:1,revision:++revision,skin,colorScheme:skin==='nebula'?'dark':'light',presentation:'window',tokens:skins[skin]}},location.origin);}addEventListener('message',e=>{if(e.origin===location.origin&&e.source===frame.contentWindow&&e.data?.type==='wizard:appearance:ready')apply();});document.querySelectorAll('button').forEach(b=>b.onclick=()=>{skin=b.dataset.skin;apply();});`;
 const csp="default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'";
 const server=http.createServer(async(req,res)=>{
  try {
   res.setHeader('Content-Security-Policy',csp);res.setHeader('Cache-Control','no-store');
-  if(req.url==='/host'){res.setHeader('Content-Type','text/html');return res.end('<!doctype html><html><head><link rel="stylesheet" href="/host.css"><script src="/host.js" defer></script></head><body><nav><button data-skin="nebula">Nebula</button><button data-skin="signal">Signal</button></nav><iframe title="Local model" src="/"></iframe></body></html>');}
+  if(req.url==='/host'){res.setHeader('Content-Type','text/html');return res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/host.css"><script src="/host.js" defer></script></head><body><nav><button data-skin="nebula">Nebula</button><button data-skin="signal">Signal</button></nav><iframe title="Local model" src="/"></iframe></body></html>');}
   if(req.url==='/host.js'){res.setHeader('Content-Type','text/javascript');return res.end(hostScript);}
   if(req.url==='/host.css'){res.setHeader('Content-Type','text/css');return res.end('html,body{margin:0;height:100%;}nav{height:48px;display:flex;gap:12px;padding:4px;}button{min-height:40px;}iframe{border:0;width:100%;height:calc(100vh - 48px);display:block;}');}
   if(req.url==='/sentinel'){res.setHeader('Content-Type','text/html');return res.end('<h1>Prior document</h1>');}
@@ -54,8 +57,8 @@ try{
    await page.getByRole('button',{name:skin,exact:false}).click();
    await frame.waitForFunction(s=>document.documentElement.dataset.skin===s,skin);
    assert.equal(await frame.locator('#url').inputValue(),'http://unsaved-machine:11434/v1');
-   const computed=await frame.evaluate(()=>({marker:window.__qaDocument,canvas:getComputedStyle(document.body).backgroundColor,overflow:document.documentElement.scrollWidth>innerWidth,radius:getComputedStyle(document.querySelector('.card')).borderRadius,scheme:document.documentElement.dataset.colorScheme}));
-   assert.equal(computed.marker,'preserved');assert.equal(computed.canvas,'rgba(0, 0, 0, 0)');assert.equal(computed.overflow,false);
+   const computed=await frame.evaluate(()=>({marker:window.__qaDocument,canvas:getComputedStyle(document.body).backgroundColor,overflow:document.documentElement.scrollWidth>innerWidth,width:innerWidth,radius:getComputedStyle(document.querySelector('.card')).borderRadius,scheme:document.documentElement.dataset.colorScheme}));
+   assert.equal(computed.marker,'preserved');assert.equal(computed.canvas,'rgba(0, 0, 0, 0)');assert.equal(computed.overflow,false);assert.equal(computed.width,profile.viewport.width);
    assert.equal(computed.scheme,skin==='nebula'?'dark':'light');if(skin==='signal')assert.equal(computed.radius,'2px');
    await frame.locator('#save').scrollIntoViewIfNeeded();
    const shot=path.join(evidence,`${name}-${skin}.png`);await page.screenshot({path:shot,fullPage:true});receipt.screenshots.push(path.basename(shot));
