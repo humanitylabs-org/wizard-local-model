@@ -36,7 +36,7 @@
     },
     "/api/settings": {
       "post": {
-        "summary": "Choose on-box GGUF or owner-tailnet base URL. Trusted Host/Origin and X-Wizard-Request:1 required.",
+        "summary": "Confirm current on-box settings. Model changes require WAM reprovisioning; remote mode disabled. Trusted Host/Origin and X-Wizard-Request:1 required.",
         "parameters": [
           {
             "in": "header",
@@ -62,8 +62,7 @@
                 "properties": {
                   "mode": {
                     "enum": [
-                      "on-box",
-                      "another-machine"
+                      "on-box"
                     ]
                   },
                   "model": {
@@ -75,7 +74,8 @@
                   },
                   "base_url": {
                     "type": "string",
-                    "description": "OpenAI-compatible HTTP(S) /v1 base resolving only to Tailscale IPs."
+                    "const": "",
+                    "description": "Empty: only the sealed loopback model is supported."
                   }
                 }
               }
@@ -84,7 +84,10 @@
         },
         "responses": {
           "200": {
-            "description": "Saved; on-box download queued."
+            "description": "Current installed settings confirmed; no download starts."
+          },
+          "409": {
+            "description": "Change or retry weights through WAM provisioning. Remote-machine mode disabled."
           },
           "400": {
             "description": "Invalid address/settings."
@@ -97,7 +100,7 @@
     },
     "/api/private-clients": {
       "post": {
-        "summary": "Mint/rotate a per-agent token. Same trusted-origin non-simple-header gate as settings.",
+        "summary": "Mint/rotate a per-agent token only after verified weights/model readiness. Same trusted-origin non-simple-header gate as settings.",
         "parameters": [
           {
             "in": "header",

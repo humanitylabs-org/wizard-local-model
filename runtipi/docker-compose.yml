@@ -29,7 +29,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     dns: [127.0.0.1]
     pids_limit: 128
-    mem_limit: 4g
+    mem_limit: 6g
     tmpfs: ["/tmp:rw,nosuid,size=64m,uid=1000,gid=1000"]
     environment:
       PORT: "18805"
