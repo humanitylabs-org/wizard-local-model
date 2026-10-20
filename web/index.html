@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local model</title>
+<link rel="stylesheet" href="styles.css">
+<script src="/appearance.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<main class="card" aria-labelledby="title">
+<header class="head">
+<h1 id="title">Local model</h1>
+<p id="status" class="status" role="status" aria-live="polite" data-state="loading">Checking…</p>
+</header>
+<p class="explain">App Manager verifies the model download before sealing this provider. Both provider and model have no internet access. Change or retry the installed model through App Manager. There is no cloud fallback.</p>
+<form id="form" novalidate>
+<fieldset>
+<legend class="lbl">Where the model runs</legend>
+<label class="radio"><input type="radio" name="mode" value="on-box" checked> On this box</label>
+<label class="radio"><input type="radio" name="mode" value="another-machine" disabled> Another machine (not available)</label>
+</fieldset>
+<div class="field" id="modelField">
+<label class="lbl" for="model">Model</label>
+<select id="model" name="model"></select>
+</div>
+<div class="field" id="urlField" hidden>
+<label class="lbl" for="url">Machine URL</label>
+<input id="url" name="base_url" type="url" inputmode="url" autocomplete="off" placeholder="http://your-machine:11434/v1" aria-describedby="urlHelp urlErr">
+<p id="urlHelp" class="muted">Use the machine's tailnet hostname and its OpenAI-compatible URL. Only tailnet addresses are accepted. The owner of that machine and its model can see your prompts. Models are discovered from that machine automatically.</p>
+<p id="urlErr" class="err" role="alert"></p>
+<p id="notice" class="notice">That machine is now inside your private boundary</p>
+</div>
+<section id="dl" class="dl" hidden aria-labelledby="dlLbl">
+<p id="dlLbl" class="lbl">Model download</p>
+<progress id="bar" max="100" aria-labelledby="dlLbl" aria-describedby="count"></progress>
+<p id="count" class="muted"></p>
+<button type="button" id="retry" class="secondary" hidden>Retry download</button>
+</section>
+<p id="formErr" class="err" role="alert"></p>
+<button type="submit" id="save" class="primary">Save</button>
+</form>
+</main>
+<p id="backNote" class="backnote" role="status" aria-live="polite"></p>
+</body>
+</html>

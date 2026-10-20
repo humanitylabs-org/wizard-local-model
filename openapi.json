@@ -1,0 +1,283 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Wizard local model",
+    "version": "0.1.0",
+    "license": {
+      "name": "GPL-3.0-only"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://wizard-local-model:18805",
+      "description": "Owner/box-only control API"
+    }
+  ],
+  "paths": {
+    "/api/connection": {
+      "get": {
+        "summary": "Connection mode, readiness, download progress and chat models. No credentials.",
+        "responses": {
+          "200": {
+            "description": "wizard.ai-connection/1; models are [{id,label}]."
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "Connection mode, readiness, download progress and chat models. No credentials.",
+        "responses": {
+          "200": {
+            "description": "wizard.ai-connection/1; models are [{id,label}]."
+          }
+        }
+      }
+    },
+    "/api/settings": {
+      "post": {
+        "summary": "Confirm current on-box settings. Model changes require WAM reprovisioning; remote mode disabled. Trusted Host/Origin and X-Wizard-Request:1 required.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Wizard-Request",
+            "required": true,
+            "schema": {
+              "const": "1"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "mode",
+                  "model",
+                  "base_url"
+                ],
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "on-box"
+                    ]
+                  },
+                  "model": {
+                    "enum": [
+                      "qwen2.5-1.5b",
+                      "qwen2.5-3b",
+                      "qwen2.5-0.5b"
+                    ]
+                  },
+                  "base_url": {
+                    "type": "string",
+                    "const": "",
+                    "description": "Empty: only the sealed loopback model is supported."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current installed settings confirmed; no download starts."
+          },
+          "409": {
+            "description": "Change or retry weights through WAM provisioning. Remote-machine mode disabled."
+          },
+          "400": {
+            "description": "Invalid address/settings."
+          },
+          "403": {
+            "description": "Untrusted owner request."
+          }
+        }
+      }
+    },
+    "/api/private-clients": {
+      "post": {
+        "summary": "Mint/rotate a per-agent token only after verified weights/model readiness. Same trusted-origin non-simple-header gate as settings.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Wizard-Request",
+            "required": true,
+            "schema": {
+              "const": "1"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "agent"
+                ],
+                "properties": {
+                  "agent": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Opaque token (48 random bytes urlsafe) returned once; store outside agent home.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "relay_url"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "relay_url": {
+                      "const": "http://wizard-local-model-relay:8090"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted owner request."
+          }
+        }
+      }
+    },
+    "/api/private-clients/{agent}": {
+      "delete": {
+        "summary": "Revoke client token. Same owner gate.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Wizard-Request",
+            "required": true,
+            "schema": {
+              "const": "1"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked, including if already absent."
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "summary": "Forward unchanged to selected private model, no body logging or persistence. No fallback.",
+        "servers": [
+          {
+            "url": "http://wizard-local-model-relay:8090",
+            "description": "Internal relay only: actual peer subnet in 10.252.0.0/16."
+          }
+        ],
+        "security": [
+          {
+            "relayBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAI-compatible models/chat JSON or unbuffered SSE."
+          },
+          "401": {
+            "description": "Missing/revoked token."
+          },
+          "403": {
+            "description": "Peer outside attached relay subnet."
+          },
+          "502": {
+            "description": "Model unavailable; no fallback."
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "summary": "Forward unchanged to selected private model, no body logging or persistence. No fallback.",
+        "servers": [
+          {
+            "url": "http://wizard-local-model-relay:8090",
+            "description": "Internal relay only: actual peer subnet in 10.252.0.0/16."
+          }
+        ],
+        "security": [
+          {
+            "relayBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAI-compatible models/chat JSON or unbuffered SSE."
+          },
+          "401": {
+            "description": "Missing/revoked token."
+          },
+          "403": {
+            "description": "Peer outside attached relay subnet."
+          },
+          "502": {
+            "description": "Model unavailable; no fallback."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "OpenAI chat body including tools, stream true/false; forwarded without parsing.",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "Owner health; on relay requires peer subnet but no token.",
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "relayBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {}
+  }
+}

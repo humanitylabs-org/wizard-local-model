@@ -1,0 +1,61 @@
+services:
+  provision:
+    # One-shot install/upgrade phase. Never on relay; never sees prompts or private data.
+    image: ${LOCAL_MODEL_IMAGE:?Set the reviewed provider image including sha256 digest}
+    user: "1000:1000"
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    environment:
+      MODEL_DIR: /models
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-qwen2.5-1.5b}
+    entrypoint: ["python3", "app/provision.py"]
+    command: []
+    volumes: ["local-models:/models"]
+    networks: [provisioning]
+  wizard-local-model:
+    # Both HTTP provider and loopback llama.cpp live in this single sealed container.
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    image: ${LOCAL_MODEL_IMAGE:?Set the reviewed provider image including sha256 digest}
+    user: "1000:1000"
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    dns: [127.0.0.1]
+    pids_limit: 128
+    mem_limit: 6g
+    tmpfs: ["/tmp:rw,nosuid,size=64m,uid=1000,gid=1000"]
+    environment:
+      PORT: "18805"
+      APP_PORT: ${APP_PORT:-18805}
+      DATA_DIR: /data/private
+      MODEL_DIR: /models
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-qwen2.5-1.5b}
+      WIZARD_TRUSTED_HOSTS: ${WIZARD_TRUSTED_HOSTS:-}
+      WIZARD_TRUSTED_ORIGINS: ${WIZARD_TRUSTED_ORIGINS:-}
+      WIZARD_OWNER_PEERS: ${WIZARD_OWNER_PEERS:-}
+    volumes:
+      - local-private-data:/data
+      - local-models:/models:ro
+    networks: [sealed-bootstrap]
+    x-runtipi:
+      is_main: true
+      internal_port: 18805
+networks:
+  provisioning: {}
+  sealed-bootstrap:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: "true"
+volumes:
+  local-private-data: {}
+  local-models: {}
+x-runtipi:
+  schema_version: 2
+  overrides: []
