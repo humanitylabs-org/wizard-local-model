@@ -17,6 +17,7 @@ services:
       DEFAULT_MODEL: ${DEFAULT_MODEL:-qwen2.5-1.5b}
       WIZARD_TRUSTED_HOSTS: ${WIZARD_TRUSTED_HOSTS:-}
       WIZARD_TRUSTED_ORIGINS: ${WIZARD_TRUSTED_ORIGINS:-}
+      WIZARD_OWNER_PEERS: ${WIZARD_OWNER_PEERS:-}
     volumes:
       - local-private-data:/data
       - local-models:/models

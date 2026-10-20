@@ -123,26 +123,18 @@ def relay_subnets():
 
 
 def owner_peer_ok(peer):
-    """Control plane admits loopback or the default-route (owner) interface only.
+    """Owner trust is explicit, never inferred from a possibly shared default route.
 
-    The internal model/relay interfaces have no default route; browser headers
-    cannot promote their peers to owner authority.
+    Pin only trusted proxy/controller IPs; the inherited box-only Origin gate
+    assumes that proxy/controller itself enforces owner access.
     """
     try:
         address = ipaddress.ip_address(peer)
         if address.is_loopback: return True
-        import fcntl
-        routes = Path('/proc/net/route').read_text().splitlines()[1:]
-        names = {row.split()[0] for row in routes if len(row.split()) >= 8 and row.split()[1] == '00000000' and int(row.split()[3],16) & 1}
-        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
-            for name in names:
-                ifreq = struct.pack('256s',name.encode()[:15])
-                ip = socket.inet_ntoa(fcntl.ioctl(sock,0x8915,ifreq)[20:24])
-                mask = socket.inet_ntoa(fcntl.ioctl(sock,0x891b,ifreq)[20:24])
-                net = ipaddress.ip_network(f'{ip}/{mask}',strict=False)
-                if address not in POOL and address in net: return True
-    except (ImportError,OSError,ValueError): pass
-    return False
+        if address in POOL: return False
+        trusted = {ipaddress.ip_address(item) for item in csv('WIZARD_OWNER_PEERS')}
+        return address in trusted
+    except ValueError: return False
 
 
 def peer_ok(peer):

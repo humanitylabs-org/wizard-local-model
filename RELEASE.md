@@ -16,5 +16,6 @@ Follow `humanitylabs-org/wizard-app-store/images/CONNECTION_RELEASE.md`:
 - Durable Thales acceptance receipt at the tested pushed commit and real model download/inference (not fixture responses).
 - Installed-shell Appearance QA on two skins and mobile/desktop, or explicitly narrower hosted-proxy evidence.
 - Private provider integration with the Agent Service / in-seal passthrough client from the sibling lanes.
+- Installer pins `WIZARD_OWNER_PEERS` for the owner-only proxy/controller; no default-route/subnet trust. Blank is loopback-only. Shared API paths/payloads are unchanged, but this stricter ingress setting must be supplied by the App Manager/Agent Service integration. A broadly accessible unauthenticated proxy is not an owner gate.
 - New image published by approved workflow and returned digest pinned in the installation recipe; current source-only candidate is not Store-listable yet.
 - Coordinator resolves the spec's local-egress sentence against the explicitly requested first-download/owner-tailnet network exception documented in README.

@@ -20,12 +20,11 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 PREFIX = 'pp-test-local-' + secrets.token_hex(3)
 IMAGE = 'pp-test-local-model:' + secrets.token_hex(4)
-OWNER_PORT = 19885
 MODEL_PORT = 19887
 PROXY_PORT = 19888
 EVIDENCE = ROOT / 'evidence'
 DOCKER = ['docker','--context',os.environ.get('TEST_DOCKER_CONTEXT','colima')]
-ENV = {**os.environ,'LOCAL_MODEL_IMAGE':IMAGE,'DEFAULT_MODEL':'qwen2.5-0.5b','APP_PORT':str(OWNER_PORT)}
+ENV = {**os.environ,'LOCAL_MODEL_IMAGE':IMAGE,'DEFAULT_MODEL':'qwen2.5-0.5b','APP_PORT':'18805'}
 COMPOSE = DOCKER + ['compose','-p',PREFIX,'-f',str(ROOT/'runtipi/docker-compose.yml'),'-f',str(EVIDENCE/'override.yml')]
 RECEIPT = {'kind':'real-model-integration','checks':{},'source_revision':os.environ.get('SOURCE_REVISION','unset'),'runner_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
 
@@ -42,12 +41,14 @@ def compose(*args, **kw): return run(COMPOSE + list(args), **kw)
 
 
 def owner(method,path,body=None):
-    conn=http.client.HTTPConnection('127.0.0.1',OWNER_PORT,timeout=10)
-    try:
-        conn.request(method,path,body=None if body is None else json.dumps(body),headers={'Content-Type':'application/json','Origin':f'http://127.0.0.1:{OWNER_PORT}','X-Wizard-Request':'1'})
-        response=conn.getresponse(); data=response.read(); assert response.status in (200,204),(path,response.status)
-        return json.loads(data) if data else None
-    finally: conn.close()
+    # Trusted control calls originate in the app itself, not an inferred/shared Docker gateway.
+    app=compose('ps','-q','wizard-local-model').stdout.decode().strip()
+    script="import http.client,json,sys; p=json.load(sys.stdin); c=http.client.HTTPConnection('127.0.0.1',18805,timeout=10); c.request(p['method'],p['path'],body=None if p['body'] is None else json.dumps(p['body']),headers={'Content-Type':'application/json','Origin':'http://localhost:18805','X-Wizard-Request':'1'}); r=c.getresponse(); data=r.read(); print(json.dumps({'status':r.status,'body':json.loads(data) if data else None})); c.close()"
+    call=run(DOCKER+['exec','-i',app,'python','-c',script],stdin=json.dumps({'method':method,'path':path,'body':body}).encode(),check=False,timeout=15)
+    if call.returncode: raise OSError('Owner loopback control not ready.')
+    reply=json.loads(call.stdout)
+    assert reply['status'] in (200,204),(path,reply['status'])
+    return reply['body']
 
 
 def await_models(limit=600):
@@ -145,7 +146,7 @@ def main():
     if os.statvfs(ROOT).f_bavail * os.statvfs(ROOT).f_frsize < 8 * 1024**3:
         raise SystemExit('Insufficient external-volume reserve (8 GiB).')
     EVIDENCE.mkdir(exist_ok=True)
-    (EVIDENCE/'override.yml').write_text('services:\n  wizard-local-model:\n    ports: ["127.0.0.1:19885:18805", "127.0.0.1:19887:18087"]\n')
+    (EVIDENCE/'override.yml').write_text('services:\n  wizard-local-model:\n    ports: ["127.0.0.1:19887:18087"]\n')
     relay_net=PREFIX+'-relay'
     proxy=None
     try:
@@ -230,8 +231,13 @@ def main():
         run(DOCKER+['network','rm',relay_net],check=False)
         run(DOCKER+['image','rm',IMAGE],check=False,timeout=30)
         RECEIPT['cleanup_remaining_containers']=run(DOCKER+['ps','-a','--filter','name='+PREFIX,'--format','{{.Names}}']).stdout.decode().split()
+        RECEIPT['cleanup_remaining_networks']=run(DOCKER+['network','ls','--filter','name='+PREFIX,'--format','{{.Name}}']).stdout.decode().split()
+        RECEIPT['cleanup_remaining_volumes']=run(DOCKER+['volume','ls','--filter','label=com.docker.compose.project='+PREFIX,'--format','{{.Name}}']).stdout.decode().split()
+        clean=not any(RECEIPT[key] for key in ('cleanup_remaining_containers','cleanup_remaining_networks','cleanup_remaining_volumes'))
+        if not clean: RECEIPT['passed']=False
         (EVIDENCE/'integration-receipt.json').write_text(json.dumps(RECEIPT,indent=2)+'\n')
         print(json.dumps(RECEIPT,indent=2),flush=True)
+        if not clean: raise RuntimeError('Disposable test resources remain; inspect cleanup receipt.')
 
 
 if __name__=='__main__': main()

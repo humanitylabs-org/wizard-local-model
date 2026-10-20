@@ -102,6 +102,17 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(self.request(self.owner,'GET','/api/connection',headers=self.owner_headers())[0],403)
         self.assertFalse((s.DATA/'clients.json').exists())
         self.assertFalse(s.owner_peer_ok('10.252.23.5'))
+    def test_owner_shared_bridge_peer_not_implicitly_trusted(self):
+        with patch.dict(os.environ,{'WIZARD_OWNER_PEERS':'172.23.0.2'}):
+            self.assertTrue(s.owner_peer_ok('172.23.0.2'))
+            self.assertFalse(s.owner_peer_ok('172.23.0.3'))
+            self.assertFalse(s.owner_peer_ok('172.23.0.1'))
+            self.assertFalse(s.owner_peer_ok('10.252.23.5'))
+        with patch.dict(os.environ,{'WIZARD_OWNER_PEERS':'172.23.0.0/24'}):
+            self.assertFalse(s.owner_peer_ok('172.23.0.3'))
+        with patch.dict(os.environ,{'WIZARD_OWNER_PEERS':''}):
+            self.assertFalse(s.owner_peer_ok('172.23.0.2'))
+            self.assertTrue(s.owner_peer_ok('127.0.0.1'))
     def test_refused_request_body_cannot_smuggle_owner_write(self):
         payload=json.dumps({'agent':'smuggled'}).encode()
         inner=(f'POST /api/private-clients HTTP/1.1\r\nHost: 127.0.0.1:{self.owner.server_port}\r\nOrigin: {self.origin}\r\nX-Wizard-Request: 1\r\nContent-Type: application/json\r\nContent-Length: {len(payload)}\r\n\r\n').encode()+payload
