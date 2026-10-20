@@ -160,7 +160,7 @@ def main():
         ids=run(DOCKER+['network','ls','-q']).stdout.decode().split()
         if ids:
             for network in json.loads(run(DOCKER+['network','inspect',*ids]).stdout):
-                used.extend(x.get('Subnet','') for x in network.get('IPAM',{}).get('Config',[]))
+                used.extend(x.get('Subnet','') for x in ((network.get('IPAM') or {}).get('Config') or []))
         import ipaddress
         occupied=[ipaddress.ip_network(x) for x in used if x]
         subnet=next(f'10.252.{n}.0/24' for n in range(240,255) if not any(ipaddress.ip_network(f'10.252.{n}.0/24').overlaps(x) for x in occupied if x.version==4))
