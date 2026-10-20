@@ -20,7 +20,7 @@ var bar=$('bar');if(tot>0){bar.max=tot;bar.value=Math.min(rec,tot);}else{bar.rem
 $('count').textContent=d.state==='failed'?'Download stopped at '+fmt(rec)+(tot?' of '+fmt(tot):'')+'.':(tot?fmt(rec)+' of '+fmt(tot)+' ('+Math.floor(rec*100/tot)+'%)':fmt(rec)+' received');
 $('retry').hidden=d.state!=='failed';}
 function poll(){if(saving){return setTimeout(poll,2000);}fetch('/api/status',{cache:'no-store',headers:{'X-Wizard-Request':'1'}}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(s){if(dirty)fillCatalog(s.catalog||[]);else applyForm(s);render(s);}).catch(function(){setStatus('Offline: cannot reach Wizard','offline');}).then(function(){setTimeout(poll,2000);});}
-function lock(b){form.querySelectorAll('input[name=mode]').forEach(function(r){r.disabled=b;});sel.disabled=b;url.disabled=b;}
+function lock(b){form.querySelectorAll('input[name=mode]').forEach(function(r){r.disabled=b||r.value==='another-machine';});sel.disabled=b;url.disabled=b;}
 function busy(b){saving=b;lock(b);$('save').disabled=b;$('retry').disabled=b;$('save').textContent=b?'Saving…':'Save';}
 function send(body){$('formErr').textContent='';busy(true);return fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json','X-Wizard-Request':'1'},body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||!j.saved)throw new Error(j.error||'Settings were not saved. Try again.');});}).then(function(){dirty=false;}).catch(function(e){$('formErr').textContent=e.message||'Settings were not saved. Try again.';}).then(function(){busy(false);});}
 form.addEventListener('input',function(e){if(saving)return;dirty=true;if(e.target===url)$('urlErr').textContent='';});

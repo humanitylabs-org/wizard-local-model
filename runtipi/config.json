@@ -3,13 +3,13 @@
   "id": "wizard-local-model",
   "wizard_type": "external",
   "available": true,
-  "short_desc": "Private inference on this box or your own machine.",
+  "short_desc": "Verified weights, sealed private inference on this box.",
   "author": "Humanity Labs",
   "port": 18805,
   "categories": [
     "network"
   ],
-  "description": "Run a pinned llama.cpp model server offline or reach your own tailnet machine. The app downloads SHA-verified GGUF weights; the model server has no internet. Another-machine addresses are owner settings. No cloud fallback or conversation logging.",
+  "description": "One-shot provisioner verifies pinned GGUF weights, then exits. Provider and loopback llama.cpp share one sealed offline container with read-only weights. Remote-machine mode disabled. No cloud fallback or conversation logging.",
   "tipi_version": 1,
   "version": "0.1.0",
   "source": "https://github.com/humanitylabs-org/wizard-local-model",
@@ -35,7 +35,7 @@
       "label": "Trusted owner proxy/controller IPs",
       "env_variable": "WIZARD_OWNER_PEERS",
       "required": true,
-      "hint": "Exact source IPs, comma separated, of trusted owner-only proxy/controller. Do not enter a shared network range. Blank admits only loopback. The proxy must enforce owner access; headers alone are not authentication."
+      "hint": "Exact source IPs, comma separated, of an optional trusted owner-only proxy. Runtime's dedicated owned ingress edge is granted automatically. Never enter a shared network range. Proxy must enforce owner access; headers alone are not authentication."
     }
   ],
   "no_gui": false

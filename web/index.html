@@ -14,12 +14,12 @@
 <h1 id="title">Local model</h1>
 <p id="status" class="status" role="status" aria-live="polite" data-state="loading">Checking…</p>
 </header>
-<p class="explain">Wizard downloads the model weights for you. The model server itself has no internet access, and there is no cloud fallback: if the model is unavailable, nothing is sent elsewhere.</p>
+<p class="explain">App Manager verifies the model download before sealing this provider. Both provider and model have no internet access. Change or retry the installed model through App Manager. There is no cloud fallback.</p>
 <form id="form" novalidate>
 <fieldset>
 <legend class="lbl">Where the model runs</legend>
 <label class="radio"><input type="radio" name="mode" value="on-box" checked> On this box</label>
-<label class="radio"><input type="radio" name="mode" value="another-machine"> Another machine</label>
+<label class="radio"><input type="radio" name="mode" value="another-machine" disabled> Another machine (not available)</label>
 </fieldset>
 <div class="field" id="modelField">
 <label class="lbl" for="model">Model</label>

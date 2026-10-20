@@ -23,7 +23,7 @@ DATA = Path(os.environ.get('DATA_DIR', '/data/private'))
 MODELS = Path(os.environ.get('MODEL_DIR', '/data/models'))
 PORT = int(os.environ.get('PORT', '18805'))
 RELAY_PORT = int(os.environ.get('RELAY_PORT', '8090'))
-LOCAL_BASE = 'http://model:8080/v1'
+LOCAL_BASE = 'http://127.0.0.1:8080/v1'
 LOCK = threading.RLock()
 DOWNLOAD_LOCK = threading.Lock()
 LOCAL_READY = threading.Event()
@@ -31,17 +31,7 @@ MAX_BODY = 8 * 1024 * 1024
 POOL = ipaddress.ip_network('10.252.0.0/16')
 AGENT = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z')
 PROGRESS = {'state': 'idle', 'received': 0, 'total': 0}
-CATALOG = [
-    {'id':'qwen2.5-1.5b','label':'Qwen2.5 1.5B Instruct (recommended)', 'size':1117320736,
-     'repo':'Qwen/Qwen2.5-1.5B-Instruct-GGUF','revision':'91cad51170dc346986eccefdc2dd33a9da36ead9',
-     'file':'qwen2.5-1.5b-instruct-q4_k_m.gguf','sha256':'6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e'},
-    {'id':'qwen2.5-3b','label':'Qwen2.5 3B Instruct', 'size':2104932768,
-     'repo':'Qwen/Qwen2.5-3B-Instruct-GGUF','revision':'7dabda4d13d513e3e842b20f0d435c732f172cbe',
-     'file':'qwen2.5-3b-instruct-q4_k_m.gguf','sha256':'626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d'},
-    {'id':'qwen2.5-0.5b','label':'Qwen2.5 0.5B Instruct (small test)', 'size':491400032,
-     'repo':'Qwen/Qwen2.5-0.5B-Instruct-GGUF','revision':'9217f5db79a29953eb74d5343926648285ec7e67',
-     'file':'qwen2.5-0.5b-instruct-q4_k_m.gguf','sha256':'74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db'},
-]
+from artifacts import CATALOG
 
 def csv(key):
     return {x.strip().lower() for x in os.environ.get(key, '').split(',') if x.strip()}
@@ -104,7 +94,7 @@ def token_ok(value):
         return any(hmac.compare_digest(digest, known) for known in load('clients.json', {}).values())
 
 
-def relay_subnets():
+def relay_subnets(pool=POOL):
     """Derive allowed peer ranges from real interface addresses, never user headers/env."""
     result = []
     try:
@@ -116,7 +106,7 @@ def relay_subnets():
                     addr = socket.inet_ntoa(fcntl.ioctl(sock, 0x8915, ifreq)[20:24])
                     mask = socket.inet_ntoa(fcntl.ioctl(sock, 0x891b, ifreq)[20:24])
                     net = ipaddress.ip_network(f'{addr}/{mask}', strict=False)
-                    if ipaddress.ip_address(addr) in POOL and net.subnet_of(POOL): result.append(net)
+                    if ipaddress.ip_address(addr) in pool and net.subnet_of(pool): result.append(net)
                 except OSError: pass
     except (ImportError, OSError, ValueError): pass
     return result
@@ -132,6 +122,9 @@ def owner_peer_ok(peer):
         address = ipaddress.ip_address(peer)
         if address.is_loopback: return True
         if address in POOL: return False
+        # Runtime's owned internal /24 grants exactly its ingress edge (+3); clients on relay are never owners.
+        ingress = ipaddress.ip_network('10.253.0.0/16')
+        if any(address == net.network_address + 3 for net in relay_subnets(ingress)): return True
         trusted = {ipaddress.ip_address(item) for item in csv('WIZARD_OWNER_PEERS')}
         return address in trusted
     except ValueError: return False
@@ -144,29 +137,35 @@ def peer_ok(peer):
     except ValueError: return False
 
 
-def tailnet_address(addr):
-    return addr in ipaddress.ip_network('100.64.0.0/10') if addr.version == 4 else addr in ipaddress.ip_network('fd7a:115c:a1e0::/48')
-
-
 def endpoint(s):
-    """Pin DNS to a validated tailnet address per connection (no redirect/rebinding)."""
-    if s['mode'] == 'on-box':
-        parsed = urllib.parse.urlsplit(LOCAL_BASE)
-        return parsed, None
-    parsed = urllib.parse.urlsplit(s['base_url'])
-    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
-        raise ValueError('Invalid private machine address.')
-    if parsed.path.rstrip('/') not in ('', '/v1'): raise ValueError('Use an OpenAI base URL ending /v1.')
-    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
-    addresses = {r[4][0] for r in socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)}
-    if not addresses or not all(tailnet_address(ipaddress.ip_address(a)) for a in addresses):
-        raise ValueError('The address must resolve only to tailnet IPs.')
-    return parsed, sorted(addresses)[0]
+    if s['mode'] != 'on-box': raise ValueError('Remote-machine mode is disabled.')
+    return urllib.parse.urlsplit(LOCAL_BASE), None
+
+
+def weights_ready():
+    try:
+        model = next(m for m in CATALOG if m['id'] == settings()['model'])
+        marker = json.loads((MODELS / 'ready.json').read_text())
+        return (settings()['mode'] == 'on-box' and marker == {'model':model['id'], 'sha256':model['sha256'], 'size':model['size']}
+                and (MODELS / model['file']).stat().st_size == model['size'])
+    except (OSError, ValueError, StopIteration): return False
+
+
+def verify_weights():
+    LOCAL_READY.clear()
+    if not weights_ready(): return
+    model = next(m for m in CATALOG if m['id'] == settings()['model'])
+    digest = hashlib.sha256()
+    with (MODELS / model['file']).open('rb') as src:
+        for chunk in iter(lambda: src.read(1024 * 1024), b''): digest.update(chunk)
+    if digest.hexdigest() == model['sha256']:
+        LOCAL_READY.set()
+        PROGRESS.update(state='ready', received=model['size'], total=model['size'])
 
 
 def upstream(method, path, body=None):
     s = settings()
-    if s['mode'] == 'on-box' and not LOCAL_READY.is_set(): raise OSError('Local model not verified/ready.')
+    if not LOCAL_READY.is_set() or not weights_ready(): raise OSError('Local model not verified/ready.')
     parsed, pinned = endpoint(s)
     if s['mode'] == 'on-box' and method == 'POST':
         # During model switch, do not silently serve the old still-running process.
@@ -210,6 +209,7 @@ def status():
     with LOCK: progress = dict(PROGRESS)
     return {**s, 'contract':'wizard.ai-connection/1','provider':'wizard-local-model','name':'Local model',
             'status':'connected' if models else 'not_connected','models':models,
+            'weights_ready':LOCAL_READY.is_set() and weights_ready(),
             'credentialStored':False,'credentialVerified':False,'error':None,
             'plan':None,'account':None,'usage':None,
             'verification':{'mode':'local-model','sdk':None,'lastVerifiedAt':None},
@@ -217,63 +217,6 @@ def status():
             'private_inference':{'kind':'local','relay_port':8090,'egress':[]},
             'boundary':'Runs on this box' if s['mode']=='on-box' else 'That machine is now inside your private boundary',
             'download':progress,'catalog':[{k:m[k] for k in ('id','label','size')} for m in CATALOG]}
-
-
-def download_model():
-    """Only this app downloads curated, revision+SHA-pinned weights; model server is offline."""
-    with DOWNLOAD_LOCK:
-        while True:
-            s = settings()
-            if s['mode'] != 'on-box':
-                with LOCK: PROGRESS.update(state='idle',received=0,total=0)
-                return
-            model = next(m for m in CATALOG if m['id'] == s['model'])
-            target = MODELS / model['file']
-            with LOCK: PROGRESS.update(state='downloading',received=0,total=model['size'])
-            try:
-                MODELS.mkdir(parents=True, exist_ok=True, mode=0o755)
-                if target.exists():
-                    digest = hashlib.sha256()
-                    with target.open('rb') as inp:
-                        for chunk in iter(lambda: inp.read(1024*1024), b''): digest.update(chunk)
-                    if target.stat().st_size != model['size'] or digest.hexdigest() != model['sha256']: target.unlink()
-                if not target.exists():
-                    part = target.with_suffix('.part')
-                    url = f"https://huggingface.co/{model['repo']}/resolve/{model['revision']}/{model['file']}"
-                    digest = hashlib.sha256()
-                    received = 0
-                    try:
-                        with urllib.request.urlopen(url, timeout=60) as response, part.open('wb') as out:
-                            while chunk := response.read(1024 * 1024):
-                                received += len(chunk)
-                                if received > model['size']: raise ValueError()
-                                out.write(chunk); digest.update(chunk)
-                                with LOCK: PROGRESS['received'] = received
-                        if received != model['size'] or digest.hexdigest() != model['sha256']: raise ValueError()
-                        os.chmod(part, 0o644); os.replace(part, target)
-                    finally: part.unlink(missing_ok=True)
-                if settings() != s: continue
-                # Atomic link + generation commit; wrapper notices generation and restarts llama.
-                link = MODELS / '.next-model'
-                link.unlink(missing_ok=True); link.symlink_to(target.name)
-                os.replace(link, MODELS / 'model.gguf')
-                (MODELS / '.next-id').write_text(model['id'])
-                os.chmod(MODELS / '.next-id', 0o644)
-                os.replace(MODELS / '.next-id', MODELS / 'model.id')
-                (MODELS / '.next-generation').write_text(secrets.token_hex(16))
-                os.chmod(MODELS / '.next-generation', 0o644)
-                os.replace(MODELS / '.next-generation', MODELS / 'generation')
-                with LOCK: PROGRESS.update(state='ready',received=model['size'],total=model['size'])
-                LOCAL_READY.set()
-                return
-            except Exception:
-                with LOCK: PROGRESS['state'] = 'failed'
-                return
-
-
-def start_download():
-    LOCAL_READY.clear()
-    threading.Thread(target=download_model, daemon=True).start()
 
 
 class QuietServer(ThreadingHTTPServer):
@@ -335,14 +278,14 @@ class Owner(Common):
             if not isinstance(body, dict): raise ValueError()
             if self.path == '/api/private-clients':
                 if set(body) != {'agent'}: raise ValueError()
+                if not LOCAL_READY.is_set() or not weights_ready() or not model_list():
+                    return self.send(503, {'error':'private_provider_unavailable'})
                 return self.send(200, {'token':mint(body['agent']),'relay_url':'http://wizard-local-model-relay:8090'})
             if self.path == '/api/settings':
                 if set(body) != {'mode','model','base_url'}: raise ValueError()
-                if body['mode'] not in ('on-box','another-machine') or body['model'] not in {m['id'] for m in CATALOG} or not isinstance(body['base_url'],str) or len(body['base_url']) > 2048: raise ValueError()
-                if body['mode'] == 'another-machine': endpoint(body)
-                else: body['base_url'] = ''
-                with LOCK: atomic(DATA / 'settings.json', body)
-                if body['mode'] == 'on-box': start_download()
+                # Changing weights is an install/upgrade provisioning operation, never an online download.
+                if body != settings() or body['mode'] != 'on-box':
+                    return self.send(409, {'error':'Reprovision through App Manager. Remote-machine mode is disabled.'})
                 return self.send(200, {'saved':True})
             return self.send(404, {'error':'Not found.'})
         except (ValueError, TypeError, KeyError, OSError):
@@ -410,7 +353,7 @@ def initialize():
 
 def main():
     initialize()
-    if settings()['mode'] == 'on-box': start_download()
+    verify_weights()
     relay = QuietServer(('0.0.0.0', RELAY_PORT), Relay)
     threading.Thread(target=relay.serve_forever, daemon=True).start()
     QuietServer((os.environ.get('BIND','0.0.0.0'), PORT), Owner).serve_forever()

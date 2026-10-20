@@ -1,14 +1,36 @@
-# Set LOCAL_MODEL_IMAGE to the published version@sha256 after review/build (see RELEASE.md).
 services:
-  wizard-local-model:
+  provision:
+    # One-shot install/upgrade phase. Never on relay; never sees prompts or private data.
     image: ${LOCAL_MODEL_IMAGE:?Set the reviewed provider image including sha256 digest}
     user: "1000:1000"
+    restart: "no"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    environment:
+      MODEL_DIR: /models
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-qwen2.5-1.5b}
+    entrypoint: ["python3", "app/provision.py"]
+    command: []
+    volumes: ["local-models:/models"]
+    networks: [provisioning]
+  wizard-local-model:
+    # Both HTTP provider and loopback llama.cpp live in this single sealed container.
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    image: ${LOCAL_MODEL_IMAGE:?Set the reviewed provider image including sha256 digest}
+    user: "1000:1000"
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    dns: [127.0.0.1]
     pids_limit: 128
-    mem_limit: 512m
-    tmpfs: ["/tmp:rw,nosuid,size=16m,uid=1000,gid=1000"]
+    mem_limit: 4g
+    tmpfs: ["/tmp:rw,nosuid,size=64m,uid=1000,gid=1000"]
     environment:
       PORT: "18805"
       APP_PORT: ${APP_PORT:-18805}
@@ -20,48 +42,17 @@ services:
       WIZARD_OWNER_PEERS: ${WIZARD_OWNER_PEERS:-}
     volumes:
       - local-private-data:/data
-      - local-models:/models
-    networks: [owner-provisioning, model-private]
+      - local-models:/models:ro
+    networks: [sealed-bootstrap]
     x-runtipi:
       is_main: true
       internal_port: 18805
-  model:
-    # App mounts first so Docker seeds the empty named model volume with uid 1000 ownership.
-    depends_on:
-      wizard-local-model:
-        condition: service_started
-    # llama.cpp b11749, OCI multi-architecture index; model server has NO public network.
-    image: ghcr.io/ggml-org/llama.cpp:server@sha256:9fbaa06d7f4449e2ae0d02b40e0431f7c212dcf231c9e3a7777a6afc2cc8f312
-    user: "1000:1000"
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 128
-    mem_limit: 6g
-    tmpfs: ["/tmp:rw,nosuid,size=64m,uid=1000,gid=1000"]
-    volumes: ["local-models:/models:ro"]
-    networks: [model-private]
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        child=''
-        trap '[ -z "$$child" ] || kill "$$child"; exit 0' TERM INT
-        while :; do
-          while [ ! -r /models/generation ]; do sleep 1; done
-          generation=$$(cat /models/generation)
-          /app/llama-server -m /models/model.gguf --alias "$$(cat /models/model.id)" --host 0.0.0.0 --port 8080 -c 4096 -t 4 --log-disable &
-          child=$$!
-          while kill -0 "$$child" 2>/dev/null && [ "$$generation" = "$$(cat /models/generation)" ]; do sleep 1; done
-          kill "$$child" 2>/dev/null || true
-          wait "$$child" || true
-          sleep 1
-        done
 networks:
-  # Provisioning exception: app downloads curated GGUF weights on first start. Also used for owner-tailnet mode.
-  # No request body is sent to a download endpoint; egress:[] means no cloud inference.
-  owner-provisioning: {}
-  model-private:
+  provisioning: {}
+  sealed-bootstrap:
     internal: true
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: "true"
 volumes:
   local-private-data: {}
   local-models: {}

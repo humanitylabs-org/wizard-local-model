@@ -16,6 +16,7 @@ import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 import server as s
+import provision as provisioning
 
 
 class FakeModel(s.Common):
@@ -50,7 +51,8 @@ class ProviderTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.patches = [patch.object(s,'DATA',self.root/'private'),patch.object(s,'MODELS',self.root/'models'),
-            patch.object(s,'PORT',self.owner.server_port),patch.object(s,'LOCAL_BASE',f'http://127.0.0.1:{self.model.server_port}/v1')]
+            patch.object(s,'PORT',self.owner.server_port),patch.object(s,'LOCAL_BASE',f'http://127.0.0.1:{self.model.server_port}/v1'),
+            patch.object(s,'weights_ready',return_value=True)]
         for p in self.patches: p.start(); self.addCleanup(p.stop)
         s.initialize(); FakeModel.requests = []; s.LOCAL_READY.set()
         self.addCleanup(s.LOCAL_READY.clear)
@@ -176,13 +178,11 @@ class ProviderTests(unittest.TestCase):
         token=s.mint('demo')
         for method,path in [('GET','/api/connection'),('POST','/api/private-clients'),('GET','/v1/models?host=evil')]:
             self.assertEqual(self.relay_request(method,path,{},token)[0],404)
-    def test_tailnet_only_rebinding_and_url_validation(self):
+    def test_remote_machine_disabled(self):
         def cfg(url): return {'mode':'another-machine','base_url':url}
         for url in ['file:///etc/passwd','http://user:password@100.64.1.2/v1','http://100.64.1.2/v1?x=y','http://100.64.1.2/admin']:
             with self.assertRaises(ValueError): s.endpoint(cfg(url))
-        with patch.object(socket,'getaddrinfo',return_value=[(2,1,6,'',('100.64.1.2',11434))]):
-            parsed,pinned=s.endpoint(cfg('http://owner-machine:11434/v1'))
-            self.assertEqual(pinned,'100.64.1.2')
+        with self.assertRaises(ValueError): s.endpoint(cfg('http://owner-machine:11434/v1'))
         for addr in ['127.0.0.1','169.254.169.254','8.8.8.8','192.168.1.2']:
             with patch.object(socket,'getaddrinfo',return_value=[(2,1,6,'',(addr,80))]):
                 with self.assertRaises(ValueError): s.endpoint(cfg('http://owner-machine/v1'))
@@ -193,8 +193,8 @@ class ProviderTests(unittest.TestCase):
             if host == '100.64.1.2': return [(2,1,6,'',('100.64.1.2',11434))]
             return lookup(host, port, *args, **kwargs)
         with patch.object(socket,'getaddrinfo',side_effect=resolve):
-            self.assertEqual(self.request(self.owner,'POST','/api/settings',body,self.owner_headers())[0],200)
-        self.assertEqual(s.settings(),body)
+            self.assertEqual(self.request(self.owner,'POST','/api/settings',body,self.owner_headers())[0],409)
+        self.assertNotEqual(s.settings(),body)
     def test_local_selection_not_yet_verified_fails_closed(self):
         s.LOCAL_READY.clear()
         token=s.mint('demo')
@@ -215,15 +215,35 @@ class ProviderTests(unittest.TestCase):
             self.assertNotIn("'unsafe-inline'",headers['Content-Security-Policy'])
     def test_download_hash_pin_and_progress(self):
         data=b'tiny-gguf-test-fixture'; model={**s.CATALOG[0],'size':len(data),'sha256':hashlib.sha256(data).hexdigest()}
-        with patch.object(s,'CATALOG',[model]),patch.object(s.urllib.request,'urlopen',return_value=io.BytesIO(data)):
-            s.download_model()
-        self.assertEqual(s.PROGRESS['state'],'ready'); self.assertEqual((s.MODELS/'model.gguf').read_bytes(),data)
-        self.assertEqual((s.MODELS/'model.id').read_text(),model['id'])
-        self.assertTrue((s.MODELS/'generation').exists())
+        result=provisioning.provision(s.MODELS,model,lambda *a,**kw:io.BytesIO(data))
+        self.assertEqual(result['sha256'],model['sha256'])
+        self.assertEqual((s.MODELS/model['file']).read_bytes(),data)
+        self.assertEqual(json.loads((s.MODELS/'ready.json').read_text()),result)
+        provisioning.provision(s.MODELS,model,lambda *a,**kw:self.fail('verified weights downloaded twice'))
     def test_bad_download_never_publishes(self):
-        with patch.object(s.urllib.request,'urlopen',return_value=io.BytesIO(b'wrong-weights')): s.download_model()
-        self.assertEqual(s.PROGRESS['state'],'failed'); self.assertFalse((s.MODELS/'generation').exists())
+        s.MODELS.mkdir();(s.MODELS/'ready.json').write_text('{}')
+        with self.assertRaises(ValueError):
+            provisioning.provision(s.MODELS,s.CATALOG[0],lambda *a,**kw:io.BytesIO(b'wrong-weights'))
+        self.assertFalse((s.MODELS/'ready.json').exists())
         self.assertFalse(list(s.MODELS.glob('*.part')))
+
+    def test_missing_ready_marker_refuses_token_mint(self):
+        with patch.object(s,'weights_ready',return_value=False):
+            code,raw,_=self.request(self.owner,'POST','/api/private-clients',{'agent':'unready'},self.owner_headers())
+            self.assertEqual(code,503);self.assertIn(b'private_provider_unavailable',raw)
+        self.assertFalse((s.DATA/'clients.json').exists())
+
+    def test_runtime_granted_ingress_only_not_relay_client(self):
+        with patch.object(s,'relay_subnets',return_value=[ipaddress.ip_network('10.253.7.0/24')]):
+            self.assertTrue(s.owner_peer_ok('10.253.7.3'))
+            for peer in ['10.253.7.2','10.253.7.4','10.252.7.3','172.23.0.2']:
+                self.assertFalse(s.owner_peer_ok(peer))
+
+    def test_manifest_artifact_pins_match_provisioner(self):
+        manifest=(s.ROOT/'wizard.md').read_text()
+        for model in s.CATALOG:
+            self.assertIn(f"https://huggingface.co/{model['repo']}/resolve/{model['revision']}/{model['file']}",manifest)
+            self.assertIn(model['sha256'],manifest)
 
 
 if __name__=='__main__': unittest.main()

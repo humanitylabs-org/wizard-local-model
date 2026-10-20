@@ -1,7 +1,7 @@
 # Image release handoff
 
 Source repo: `humanitylabs-org/wizard-local-model`, GPL-3.0-only.
-Runtime build context is this repo (`Dockerfile`, `app/`, `web/`, `openapi.json`, LICENSE). Tests are stdlib-only. The pinned Python and llama.cpp digests are OCI indexes supporting amd64/arm64; model GGUF source revisions, byte sizes and SHA256s are in `app/server.py` (queried from Hugging Face's real blob metadata).
+Runtime build context is this repo (`Dockerfile`, `app/`, `web/`, `openapi.json`, LICENSE). Tests are stdlib-only. The pinned llama.cpp base digest supports amd64/arm64; model GGUF source revisions, byte sizes and SHA256s are in `app/artifacts.py` and `wizard.md`. Both runtime and provisioner use the same reviewed image.
 
 Follow `humanitylabs-org/wizard-app-store/images/CONNECTION_RELEASE.md`:
 
@@ -18,4 +18,4 @@ Follow `humanitylabs-org/wizard-app-store/images/CONNECTION_RELEASE.md`:
 - Private provider integration with the Agent Service / in-seal passthrough client from the sibling lanes.
 - Installer pins `WIZARD_OWNER_PEERS` for the owner-only proxy/controller; no default-route/subnet trust. Blank is loopback-only. Reserve the trusted source IP (or re-pin each start); isolate that peer on a dedicated owner network or otherwise prevent L2/IP spoofing by coinstalled apps. Shared API paths/payloads are unchanged, but this stricter ingress setting must be supplied by the App Manager/Agent Service integration. A broadly accessible unauthenticated proxy is not an owner gate. The trusted proxy must strip forwarded-identity headers because this app rejects them; prove that actual owner route works before release.
 - New image published by approved workflow and returned digest pinned in the installation recipe; current source-only candidate is not Store-listable yet.
-- Coordinator resolves the spec's local-egress sentence against the explicitly requested first-download/owner-tailnet network exception documented in README.
+- WAM must preserve the provider's internal-only bootstrap networks (no automatic public shared-network attachment), including before runtime sealing. Provisioner must never join the relay; weights mount read-only in runtime. Remote owner-machine mode remains disabled pending a separately specified private routing boundary.

@@ -51,12 +51,13 @@ try{
   const errors=[];page.on('pageerror',e=>errors.push(String(e)));
   await page.goto(origin+'/host');const frame=page.frames().find(f=>f.url()===origin+'/');
   assert(frame);await frame.locator('#status').filter({hasText:'Model ready'}).waitFor();
-  await frame.locator('input[value="another-machine"]').check();await frame.locator('#url').fill('http://unsaved-machine:11434/v1');
+  assert.equal(await frame.locator('input[value="another-machine"]').isDisabled(),true);
+  await frame.locator('#model').selectOption('qwen2.5-0.5b');
   await frame.evaluate(()=>window.__qaDocument='preserved');
   for(const skin of ['nebula','signal']){
    await page.getByRole('button',{name:skin,exact:false}).click();
    await frame.waitForFunction(s=>document.documentElement.dataset.skin===s,skin);
-   assert.equal(await frame.locator('#url').inputValue(),'http://unsaved-machine:11434/v1');
+   assert.equal(await frame.locator('#model').inputValue(),'qwen2.5-0.5b');
    const computed=await frame.evaluate(()=>({marker:window.__qaDocument,canvas:getComputedStyle(document.body).backgroundColor,overflow:document.documentElement.scrollWidth>innerWidth,width:innerWidth,radius:getComputedStyle(document.querySelector('.card')).borderRadius,scheme:document.documentElement.dataset.colorScheme}));
    assert.equal(computed.marker,'preserved');assert.equal(computed.canvas,'rgba(0, 0, 0, 0)');assert.equal(computed.overflow,false);assert.equal(computed.width,profile.viewport.width);
    assert.equal(computed.scheme,skin==='nebula'?'dark':'light');if(skin==='signal')assert.equal(computed.radius,'2px');
@@ -68,7 +69,7 @@ try{
   await frame.evaluate(()=>window.postMessage({type:'wizard:appearance',appearance:{skin:'evil'}},location.origin));
   assert.equal(await frame.evaluate(()=>document.documentElement.dataset.skin),'signal');
   await frame.locator('#save').click();await frame.waitForFunction(()=>!document.querySelector('#save').disabled);
-  assert.equal(state.mode,'another-machine');assert.equal(state.base_url,'http://unsaved-machine:11434/v1');
+  assert.equal(state.mode,'on-box');assert.equal(state.model,'qwen2.5-0.5b');
   assert.deepEqual(errors,[]);receipt.checks.push({profile:name,save:true,no_page_errors:true});
   await ctx.close();
  }
