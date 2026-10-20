@@ -1,0 +1,70 @@
+name: Test and optional immutable image
+on:
+  pull_request:
+  push:
+    branches: [main, feature/private-providers-local-model]
+  workflow_dispatch:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+        description: Publish reviewed main as a NEW immutable version
+      version:
+        type: string
+        default: '0.1.0'
+        description: Fresh semver version matching manifests
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Unit HTTP fixtures (not real inference)
+        run: |
+          python3 -m unittest discover -s tests -v
+          node --check web/app.js
+          node --check web/appearance.js
+          git diff --check
+  image:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency:
+      group: immutable-local-model-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Refuse mutable or mismatched version
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/assert_new_version.py
+      - name: Login
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Build multiarch and publish once
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 --push --tag "ghcr.io/${GITHUB_REPOSITORY}:${VERSION}" --metadata-file image-metadata.json .
+          docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}:${VERSION}"
+      - name: Test published native image health
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY}:${VERSION}"
+          docker pull "$IMAGE"
+          docker run -d --name pp-test-local-image --read-only --cap-drop ALL --security-opt no-new-privileges --network none --tmpfs /data:uid=1000,gid=1000 --tmpfs /models:uid=1000,gid=1000 -e DEFAULT_MODEL=qwen2.5-0.5b "$IMAGE"
+          trap 'docker rm -f pp-test-local-image' EXIT
+          for n in $(seq 1 20); do
+            if docker exec pp-test-local-image python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:18805/healthz').status==200"; then exit 0; fi
+            sleep 1
+          done
+          exit 1

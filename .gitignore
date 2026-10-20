@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.data/
+.env
+evidence/
+node_modules/
