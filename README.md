@@ -11,6 +11,12 @@ Private on-box inference. GPL-3.0-only. Review candidate, not a published Store 
 
 The local provider sees plaintext by design. Neither provider nor llama logs prompts/completions or stores conversation bodies. The downloader never sees them. Remote owner-machine/tailnet mode is **disabled** (API refuses, UI unavailable); separate private routing/trust design is follow-up, not this package's capability. Changing/retrying weights is a WAM install/upgrade provisioning operation, not an online settings download.
 
+### Integration/release limits
+
+- Installer/update orchestration must invoke runtime reconciliation before discovery/linking. This candidate has internal-only bootstrap and startup reconciliation, not an automatic WAM post-install hook. Until reconciled, the provider is safely unavailable.
+- Runtipi's lifecycle database can mark a provider stopped after runtime restarts its container. A later WAM registry refresh can then make it unavailable despite a healthy model. The disposable acceptance uses explicit WAM start plus runtime/agent reconciliation; durable lifecycle-status synchronization remains release work, not a claim made by these six checks.
+- Online selection changes are rejected. Switching an existing install to a different model still needs settings migration coordinated with provisioning; this lane exercises the same tiny model across upgrades. Larger models, full extended-context answer quality, and a port of the legacy standalone harness remain unverified.
+
 ## Image / installation
 
 Build the exact reviewed pushed source (`Dockerfile`), based on the pinned multiarch llama.cpp OCI image. Production release follows `RELEASE.md`; no fabricated/published digest is claimed. Supply `LOCAL_MODEL_IMAGE=ghcr.io/humanitylabs-org/wizard-local-model:<new-version>@sha256:<real-index-digest>`. Runtime and provisioner use that same image. Named volumes are project-scoped. For isolated testing only, a locally built tag is accepted; production must pin a real digest. Set `DEFAULT_MODEL=qwen2.5-0.5b` in WAM's persistent app.env for the tiny test artifact.
